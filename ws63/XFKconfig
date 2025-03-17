@@ -1,0 +1,34 @@
+
+menu "port_xf_uart configuration"
+
+    choice
+        prompt "port_xf_uart sample"
+        default PORT_XF_UART_INT_TRANSFER_MODE
+        # POLL 和 DMA 暂不支持
+        # config PORT_XF_UART_POLL_TRANSFER_MODE
+        #     bool "Choose UART poll transfer mode."
+        config PORT_XF_UART_INT_TRANSFER_MODE
+            bool "Choose UART interrupt transfer mode."
+        # config PORT_XF_UART_DMA_TRANSFER_MODE
+        #     bool "Choose UART dma transfer mode."
+    endchoice
+
+endmenu # "tasks_xf_entry configuration"
+
+menu "tasks_xf_entry configuration"
+
+    config TASKS_XF_PREMAIN_STACK_SIZE
+        int
+        prompt "tasks_xf_premain() task stack size."
+        default 8192
+
+    config TASKS_XF_PREMAIN_PRIORITY
+        int
+        prompt "tasks_xf_premain() task priority."
+        default 24
+        range 0 31
+        help
+            Set the priority of the tasks_xf_premain() task.
+            0 is the highest and 31 is the lowest.
+
+endmenu # "tasks_xf_entry Configuration"

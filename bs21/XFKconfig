@@ -1,0 +1,101 @@
+
+menu "port_xf_uart configuration"
+
+    choice
+        prompt "port_xf_uart sample"
+        default PORT_XF_UART_INT_TRANSFER_MODE
+        # POLL 和 DMA 暂不支持
+        # config PORT_XF_UART_POLL_TRANSFER_MODE
+        #     bool "Choose UART poll transfer mode."
+        config PORT_XF_UART_INT_TRANSFER_MODE
+            bool "Choose UART interrupt transfer mode."
+        # config PORT_XF_UART_DMA_TRANSFER_MODE
+        #     bool "Choose UART dma transfer mode."
+    endchoice
+
+endmenu # "tasks_xf_entry configuration"
+
+menu "tasks_xf_entry configuration"
+
+    config TASKS_XF_PREMAIN_STACK_SIZE
+        int
+        prompt "tasks_xf_premain() task stack size."
+        default 8192
+
+    config TASKS_XF_PREMAIN_PRIORITY
+        int
+        prompt "tasks_xf_premain() task priority."
+        default 17
+        range 0 31
+        help
+            Set the priority of the tasks_xf_premain() task.
+            0 is the highest and 31 is the lowest.
+
+endmenu # "tasks_xf_entry Configuration"
+
+config ENABLE_RST_IO
+    bool
+    prompt "Enable reset IO."
+    default n
+
+config ENABLE_SYS_RAM_LOG
+    bool
+    prompt "Enable system ram info log."
+    default n
+
+menu "Reset io configuration"
+    depends on ENABLE_RST_IO
+
+    # RST IO NUM
+    config RST_IO_NUM
+        int
+        prompt "BS2x Reset IO number."
+        default 21
+        range 0 31
+
+    # RST IO PULL TYPE
+    choice RST_IO_PULL_TYPE_CHOICE
+        bool "BS2x Reset IO pull type."
+        default RST_IO_PULL_UP
+
+        config RST_IO_PULL_NONE
+            bool "None"
+        config RST_IO_PULL_UP
+            bool "pull up"
+        config RST_IO_PULL_DOWN
+            bool "pull down"
+    endchoice
+
+    config RST_IO_PULL_TYPE
+        int
+        default 0 if RST_IO_PULL_NONE
+        default 1 if RST_IO_PULL_UP
+        default 2 if RST_IO_PULL_DOWN
+    
+    # RST IO TRIGGER TYPE
+    choice RST_IO_TRIGGER_TYPE_CHOICE
+        bool "BS2x Reset IO trigger type."
+        default RST_IO_TRIGGER_LOW_LEVEL
+
+        config RST_IO_TRIGGER_RISING_EDGE
+            bool "Rising edge"
+        config RST_IO_TRIGGER_FALLING_EDGE
+            bool "Falling edge"
+        config RST_IO_TRIGGER_DUAL_EDGE
+            bool "Dual edge (Rising and Falling)"
+        config RST_IO_TRIGGER_LOW_LEVEL
+            bool "Low level"
+        config RST_IO_TRIGGER_HIGH_LEVEL
+            bool "High level"
+        
+    endchoice
+
+    config RST_IO_TRIGGER_TYPE
+        int
+        default 1 if RST_IO_TRIGGER_RISING_EDGE
+        default 2 if RST_IO_TRIGGER_FALLING_EDGE
+        default 3 if RST_IO_TRIGGER_DUAL_EDGE
+        default 4 if RST_IO_TRIGGER_LOW_LEVEL
+        default 8 if RST_IO_TRIGGER_HIGH_LEVEL
+
+endmenu # "Reset io configuration"
