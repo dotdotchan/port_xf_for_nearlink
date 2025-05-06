@@ -268,6 +268,12 @@ xf_err_t xf_sle_ssapc_request_write_data(
         .handle = handle,
         .type = type,
     };
+
+    while (port_sle_flow_ctrl_state_get(conn_id) == false)
+    {
+        uapi_watchdog_kick();
+    }
+
     xf_err_t ret = ssapc_write_req(app_id, conn_id, &param);
     XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
              TAG, "ssapc_write_req failed!:%#X", ret);
@@ -286,6 +292,12 @@ xf_err_t xf_sle_ssapc_request_write_cmd(
         .handle = handle,
         .type = type,
     };
+
+    while (port_sle_flow_ctrl_state_get(conn_id) == false)
+    {
+        uapi_watchdog_kick();
+    }
+
     xf_err_t ret = ssapc_write_cmd(app_id, conn_id, &param);
     XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
              TAG, "ssapc_write_req failed!:%#X", ret);
