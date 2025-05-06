@@ -25,7 +25,7 @@ menu "tasks_xf_entry configuration"
     config TASKS_XF_PREMAIN_PRIORITY
         int
         prompt "tasks_xf_premain() task priority."
-        default 17
+        default 24
         range 0 31
         help
             Set the priority of the tasks_xf_premain() task.
