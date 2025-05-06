@@ -16,7 +16,7 @@
 
 #include "key_id.h"
 #include "nv.h"
-// #include "nv_common_cfg.h"
+#include "common.h"
 
 /* ==================== [Defines] =========================================== */
 
@@ -166,7 +166,8 @@ xf_err_t xf_sle_set_phy_params(uint16_t conn_id, xf_sle_set_phy_t *sle_phy)
         .rx_phy = sle_phy->rx_phy,
         .tx_format = sle_phy->tx_format,
         .rx_format = sle_phy->rx_format,
-        .tx_pilot_density = sle_phy->rx_pilot_density,
+        .tx_pilot_density = sle_phy->tx_pilot_density,
+        .rx_pilot_density = sle_phy->rx_pilot_density,
         .t_feedback = sle_phy->t_feedback,
         .g_feedback = sle_phy->g_feedback,
     };
@@ -226,11 +227,77 @@ xf_err_t xf_sle_set_max_pwr(int8_t ble_pwr, int8_t sle_pwr)
     return XF_OK;
 }
 
+
+#define PORT_NV_ID_BTH_BLE_NV_RESERVERD     (0xE)
+
+#define GLE_PWR_LEVEL_GFSK_MAX_PWR          (8)
+#define GLE_PWR_LEVEL_GFSK_MIN_PWR          (-12)
+
+#define SLE_PWR_LEVEL_PSK_MAX_PWR           (2)
+#define SLE_PWR_LEVEL_PSK_MIN_PWR           (-16)
+
+// typedef union _port_bth_ble_nv_reserved_t port_bth_ble_nv_reserved_t;
+
+typedef struct
+{
+    uint8_t _reserve    :6;
+    uint8_t sle_psk     :1;
+    uint8_t gle_gfsk    :1;
+} gle_customize_pwr_en_t;
+
+typedef union _port_bth_ble_nv_reserved_t
+{
+    bth_ble_nv_reserved_struct_t _bth_ble_nv_reserved;
+    struct 
+    {
+        gle_customize_pwr_en_t gle_customize_pwr_en;
+        uint8_t gle_gfsk_max_pwr;
+        uint8_t sle_psk_max_pwr;
+        // uint8_t _reserve[BTH_BLE_RESERVE_LEN - xf_offsetof(union _port_bth_ble_nv_reserved_t, _reserve)];
+        uint8_t _reserve[BTH_BLE_RESERVE_LEN - 4];
+    };
+    
+} port_bth_ble_nv_reserved_t;
+
+static port_bth_ble_nv_reserved_t s_gle_nv_cfg = {
+    .gle_customize_pwr_en = 
+    {
+        .gle_gfsk = true,
+        .sle_psk = true,
+    },
+    .gle_gfsk_max_pwr = GLE_PWR_LEVEL_GFSK_MAX_PWR,
+    .sle_psk_max_pwr = SLE_PWR_LEVEL_PSK_MAX_PWR,
+};
+
 // 配置发射功率档位（根据指定的发射功率）
 xf_err_t xf_sle_set_max_pwr_level_by_pwr(int8_t target_max_pwr)
 {
-    /* TODO 暂未弄明白功率 nv 是怎么配置的 */
-    return XF_ERR_NOT_SUPPORTED;
+    /* 如果预期功率 > 最大功率档位功率 (gle_gfsk pwr max) -> 返回错误 */
+    XF_ASSERT(target_max_pwr <= GLE_PWR_LEVEL_GFSK_MAX_PWR, XF_ERR_INVALID_ARG,
+        TAG, "target_max_pwr(%d) > MAX(%d)", target_max_pwr, GLE_PWR_LEVEL_GFSK_MAX_PWR);
+
+    /* 如果预期功率 < 最小功率档位功率 (gle_psk pwr min) -> 返回错误码 */
+    XF_ASSERT(target_max_pwr >= SLE_PWR_LEVEL_PSK_MIN_PWR, XF_ERR_INVALID_ARG,
+        TAG, "target_max_pwr(%d) < MIN(%d)", target_max_pwr, SLE_PWR_LEVEL_PSK_MIN_PWR);
+
+
+    /* 如果预期功率 >= sle psk 最大档位 -> sle_psk 功率档位设置为最大， gle_gfsk 设置为预期值 */
+    if(target_max_pwr >= SLE_PWR_LEVEL_PSK_MAX_PWR)
+    {
+        s_gle_nv_cfg.sle_psk_max_pwr = SLE_PWR_LEVEL_PSK_MAX_PWR;
+        s_gle_nv_cfg.gle_gfsk_max_pwr = target_max_pwr;
+    }
+
+    /* 如果预期功率 <= sle gfsk 最小档位 -> gle_gfsk 功率档位设置为最大， sle_psk 设置为预期值 */
+    else if(target_max_pwr <= GLE_PWR_LEVEL_GFSK_MIN_PWR)
+    {
+        s_gle_nv_cfg.gle_gfsk_max_pwr = GLE_PWR_LEVEL_GFSK_MIN_PWR;
+        s_gle_nv_cfg.sle_psk_max_pwr = target_max_pwr;
+    }
+    
+    errcode_t nv_ret = uapi_nv_write(PORT_NV_ID_BTH_BLE_NV_RESERVERD, 
+        (uint8_t *)&s_gle_nv_cfg, sizeof(s_gle_nv_cfg));
+    XF_CHECK(nv_ret != ERRCODE_SUCC, XF_ERR_INVALID_ARG, TAG, "WRITE NV_ID_BTC_TXPOWER_CFG failed");
 }
 
 /* ==================== [Static Functions] ================================== */
