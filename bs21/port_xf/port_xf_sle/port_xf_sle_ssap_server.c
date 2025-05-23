@@ -15,6 +15,7 @@
 #include "sle_ssap_server.h"
 #include "sle_errcode.h"
 #include "xf_sle_ssap_server.h"
+#include "port_sle_transmition_manager.h"
 
 #include "port_sle_ssap.h"
 
@@ -156,6 +157,11 @@ xf_err_t xf_sle_ssaps_add_service_to_app(
          * 则从头检查 desc_set 数组各项，逐个特征项添加，直至遇到遇到
          * desc_uuid == XF_SLE_ATTR_SET_END_FLAG 的项结束
          */
+        if(prop->desc_set == NULL)
+        {
+            ++cnt_prop;
+            continue;
+        }
         uint16_t cnt_desc = 0;
         while (prop->desc_set[cnt_desc].desc_uuid != XF_SLE_ATTR_SET_END_FLAG) {
             xf_sle_ssaps_desc_t *desc = &prop->desc_set[cnt_desc];
@@ -177,6 +183,7 @@ xf_err_t xf_sle_ssaps_add_service_to_app(
                 XF_LOGE(TAG, "ssaps_add_descriptor_sync failed!:%#X", ret);
                 goto process_error;
             }
+            ++cnt_desc;
         }
         ++cnt_prop;
     }
@@ -272,6 +279,12 @@ xf_err_t xf_sle_ssaps_send_notify_indicate(
         .value = param->value,
         .value_len = param->value_len,
     };
+
+    while (port_sle_flow_ctrl_state_get(conn_id) == false)
+    {
+        uapi_watchdog_kick();
+    }
+    
     xf_err_t ret = ssaps_notify_indicate(app_id, conn_id, &param_ntf_ind);
     XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
              TAG, "ssaps_notify_indicate failed!:%#X", ret);

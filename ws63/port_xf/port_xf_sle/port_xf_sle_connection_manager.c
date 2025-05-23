@@ -166,7 +166,8 @@ xf_err_t xf_sle_set_phy_params(uint16_t conn_id, xf_sle_set_phy_t *sle_phy)
         .rx_phy = sle_phy->rx_phy,
         .tx_format = sle_phy->tx_format,
         .rx_format = sle_phy->rx_format,
-        .tx_pilot_density = sle_phy->rx_pilot_density,
+        .tx_pilot_density = sle_phy->tx_pilot_density,
+        .rx_pilot_density = sle_phy->rx_pilot_density,
         .t_feedback = sle_phy->t_feedback,
         .g_feedback = sle_phy->g_feedback,
     };

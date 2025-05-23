@@ -262,10 +262,11 @@ static int port_pwm_ioctl(xf_hal_dev_t *dev, uint32_t cmd, void *config)
             .high_time = high_cnt,
             .low_time = low_cnt,
         };
+        uapi_pwm_open(port_pwm->ch, &pwm_cfg);
 #if PWM_CH_SEPARATE_GROUP
         uapi_pwm_set_group(port_pwm->group, &port_pwm->ch, 1);
+        uapi_pwm_start_group(port_pwm->group);
 #endif
-        uapi_pwm_open(port_pwm->ch, &pwm_cfg);
         uapi_pwm_start(port_pwm->group);
     }break;
     case PORT_DEV_STATE_CHANGE_TO_STOP:

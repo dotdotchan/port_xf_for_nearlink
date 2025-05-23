@@ -120,7 +120,7 @@ xf_err_t xf_ble_gatts_add_service(
     XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
             TAG, "gatts_add_service_sync failed!:%#X", ret);
 
-    XF_LOGI(TAG, ">>> SVC:0x%02X%02X hdl:%d", 
+    XF_LOGD(TAG, ">>> SVC:0x%02X%02X hdl:%d", 
             service_uuid_param.uuid[0], service_uuid_param.uuid[1], 
             service->handle);
 
@@ -155,7 +155,7 @@ xf_err_t xf_ble_gatts_add_service(
         chara_set[cnt_chara].handle = result_chara.handle;
         chara_set[cnt_chara].value_handle = result_chara.value_handle;
         
-        XF_LOGI(TAG, ">>> CHARA:0x%02X%02X hdl:%d val_hdl:%d", 
+        XF_LOGD(TAG, ">>> CHARA:0x%02X%02X hdl:%d val_hdl:%d", 
             chara.chara_uuid.uuid[0], chara.chara_uuid.uuid[1], 
             chara_set[cnt_chara].handle, chara_set[cnt_chara].value_handle);
         
@@ -186,7 +186,7 @@ xf_err_t xf_ble_gatts_add_service(
             XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
                 TAG, "gatts_add_descriptor_sync failed!:%#X", ret);
 
-            XF_LOGI(TAG, ">>> DESC:0x%02X%02X hdl:%d", 
+            XF_LOGD(TAG, ">>> DESC:0x%02X%02X hdl:%d", 
                 desc.desc_uuid.uuid[0], desc.desc_uuid.uuid[1], 
                 desc_set[cnt_desc].handle);
 
