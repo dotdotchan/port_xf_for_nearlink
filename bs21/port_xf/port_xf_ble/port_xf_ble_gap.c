@@ -73,6 +73,18 @@ xf_err_t xf_ble_enable(void)
     errcode_t ret = enable_ble();
     XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
              TAG, "enable_ble failed!:%#X", ret);
+
+    bd_addr_t dev_addr = {.type = BT_ADDRESS_TYPE_PUBLIC_DEVICE_ADDRESS};
+    ret = ext_xf_ft_ble_mac_load_default(dev_addr.addr);
+    if (ret != ERRCODE_SUCC)
+    {
+        XF_LOGW(TAG, "get default mac failed!");
+        return XF_OK;
+    }
+
+    ret = gap_ble_set_local_addr(&dev_addr);
+    XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
+             TAG, "gap_ble_set_local_addr failed!:%#X", ret);
     return XF_OK;
 }
 

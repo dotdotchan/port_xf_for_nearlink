@@ -36,6 +36,17 @@ xf_err_t xf_sle_enable(void)
     errcode_t ret = enable_sle();
     XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
              TAG, "enable_sle failed!:%#X", ret);
+
+    sle_addr_t dev_addr = {.type = SLE_ADDRESS_TYPE_PUBLIC};
+    ret = ext_xf_ft_sle_mac_load_default(dev_addr.addr);
+    if (ret != ERRCODE_SUCC)
+    {
+        XF_LOGW(TAG, "get default mac failed!");
+        return XF_OK;
+    }
+    ret = sle_set_local_addr(&dev_addr);
+    XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
+             TAG, "sle_set_local_addr failed!:%#X", ret);
     return XF_OK;
 }
 
@@ -52,7 +63,7 @@ xf_err_t xf_sle_set_local_addr(xf_sle_addr_t *addr)
 {
     sle_addr_t own_addr = {.type = addr->type};
     memcpy(own_addr.addr, addr->addr, XF_SLE_ADDR_LEN);
-
+    
     errcode_t ret = sle_set_local_addr(&own_addr);
     XF_CHECK(ret != ERRCODE_SUCC, (xf_err_t)ret,
              TAG, "sle_set_local_addr failed!:%#X", ret);
