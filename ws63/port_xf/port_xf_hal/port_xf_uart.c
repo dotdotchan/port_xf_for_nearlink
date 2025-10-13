@@ -11,6 +11,13 @@
 
 #include "xf_hal_port.h"
 
+
+#define RX_MODE_XF_RB   1
+#define RX_MODE_XT_RB   2
+#define RX_MODE_LIST    3
+
+#define RX_MODE     (RX_MODE_LIST)
+
 #if (XF_HAL_UART_IS_ENABLE)
 
 #include "xf_utils.h"
@@ -30,6 +37,7 @@
 #include "pinctrl.h"
 #include "platform_core_rom.h"
 #include "app_init.h"
+#include "xtiny_rb.h"
 
 #include "uart.h"
 
@@ -60,9 +68,18 @@
 typedef struct _port_uart_t {
     uint8_t internal_rx_buf[UART_INTERNAL_BUF_SIZE];
     xf_ringbuf_t rx_ringbuf_info;   // RX ringbuf 信息
+    struct xtiny_rb rx_rb;
     port_dev_state_t state;
     uint8_t rx_ringbuf[0];          //  RX ringbuf 存储区
 } port_uart_t;
+
+typedef struct 
+{
+    uint16_t len;
+    uint16_t offset;
+    xf_list_t link;
+    uint8_t data[0];
+} port_uart_recv_node_t;
 
 /* ==================== [Static Prototypes] ================================= */
 
@@ -109,6 +126,8 @@ static const uint8_t map_uart_flow_control[] = {
  */
 static port_uart_t *(s_uart_obj_set[UART_MAX_INDEX]) = {NULL};
 
+static xf_list_t s_recv_list = XF_LIST_HEAD_INIT(s_recv_list);
+
 /* ==================== [Macros] ============================================ */
 
 /* ==================== [Global Functions] ================================== */
@@ -128,6 +147,7 @@ int port_xf_uart_register(void)
 XF_INIT_EXPORT_PREV(port_xf_uart_register);
 
 uint32_t g_recv_cnt = 0;
+xf_rb_size_t g_w_rb_cnt = 0;
 
 /* ==================== [Static Functions] ================================== */
 
@@ -144,14 +164,33 @@ static void _uartn_rx_int_cb(
     }
 
     g_recv_cnt += length;
+
+#if (RX_MODE == RX_MODE_XF_RB)
     uint32_t irq_sts = uart_porting_lock(bus);
     xf_rb_size_t free = xf_ringbuf_get_free(&s_uart_obj_set[bus]->rx_ringbuf_info);
     if (free < length)
     {
         XF_LOGE(TAG, ">>>>>>:free:%d,len:%d,cnr:%d", free, length, g_recv_cnt);
     }
-    xf_ringbuf_write(&s_uart_obj_set[bus]->rx_ringbuf_info, buffer, length);
+    g_w_rb_cnt += xf_ringbuf_write(&s_uart_obj_set[bus]->rx_ringbuf_info, buffer, length);
     uart_porting_unlock(bus, irq_sts);
+
+#elif (RX_MODE == RX_MODE_XT_RB)
+
+    g_w_rb_cnt += xtiny_rb_write(&s_uart_obj_set[bus]->rx_rb, buffer, length, XTINY_RB_NO_FORCE);
+
+#elif (RX_MODE == RX_MODE_LIST)
+
+    port_uart_recv_node_t *node = malloc(sizeof(port_uart_recv_node_t) + length);
+    XF_CHECK(node == NULL, XF_RETURN_VOID, TAG, "node malloc failed!");
+
+    node->len = length;
+    node->offset = 0;
+    memcpy(node->data, buffer, length);
+
+    xf_list_add_tail(&node->link, &s_recv_list);
+
+#endif
 }
 
 static void _uart0_rx_int_cb(const void *buffer, uint16_t length, bool error)
@@ -193,11 +232,17 @@ static int port_uart_open(xf_hal_dev_t *dev)
     }
 
     /* 初始化环形缓冲区 */
+
+#if (RX_MODE == RX_MODE_XF_RB)
+
     xf_err_t ret = xf_ringbuf_init(&port_uart->rx_ringbuf_info, 
         port_uart->rx_ringbuf, rx_buf_size);
     XF_CHECK(XF_OK != ret, ret,
              TAG,  "xf_ringbuf_init error:%d", ret);
 
+#elif (RX_MODE == RX_MODE_XT_RB)
+    xtiny_rb_init(&port_uart->rx_rb, port_uart->rx_ringbuf, rx_buf_size);
+#endif
     dev->platform_data = port_uart;
 
     return XF_OK;
@@ -415,15 +460,73 @@ static int port_uart_ioctl(xf_hal_dev_t *dev, uint32_t cmd, void *config)
     return XF_OK;
 }
 
+uint32_t g_rb_cnt = 0;
 static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
 {
     port_uart_t *port_uart = (port_uart_t *)dev->platform_data;
     uint8_t uart_num = dev->id;
-    int32_t len = 0;
+    int32_t len_read = 0;
+
+#if (RX_MODE == RX_MODE_XF_RB)
+
     uint32_t irq_sts = uart_porting_lock(uart_num);
-    len = xf_ringbuf_read(&port_uart->rx_ringbuf_info, buf, count);
+    len_read = xf_ringbuf_read(&port_uart->rx_ringbuf_info, buf, count);
+    g_rb_cnt += len_read;
     uart_porting_unlock(uart_num, irq_sts);
-    return len;
+
+#elif (RX_MODE == RX_MODE_XT_RB)
+
+    len_read = xtiny_rb_read(&port_uart->rx_rb, buf, count);
+    g_rb_cnt += len_read;
+
+#elif (RX_MODE == RX_MODE_LIST)
+
+    port_uart_recv_node_t *node, *temp;
+    xf_list_for_each_entry_safe(node, temp, &s_recv_list, port_uart_recv_node_t, link)
+    {
+        uint16_t rest = node->len - node->offset;
+        /* 预期剩余数量不超过节点剩余数 -> 本次拷贝数量等于 count */
+        uint16_t len_copy = 0;
+        if (count <= rest)
+        {
+            len_copy = count;
+            
+        }
+        /* 预期剩余数量超过节点剩余数 -> 本次拷贝数量等于 节点剩余数 */
+        else
+        {
+            len_copy = rest;
+        }
+
+        /* 拷贝数据，更新 预期剩余数 以及 节点信息 (offset， len) */
+        memcpy(buf, &node->data[node->offset], len_copy);
+        ((uint8_t *)buf)[len_copy] = 0;
+        XF_LOGI(TAG, ">>node len:%d, off:%d, cp:%d, rest:%d,%.*s", 
+            node->len, node->offset, len_copy, count, len_copy, &node->data[node->offset]);
+
+        count -= len_copy;
+        node->offset += len_copy;
+        node->len -= len_copy;
+
+        len_read += len_copy;
+
+        /* 检查是否达到预期数量以及节点可回收状况 */
+        /* 节点有效数据量为 0 -> 移除并回收节点 */
+        if (node->len == 0)
+        {
+            XF_LOGI(TAG, ">> del node"); 
+            xf_list_del(&node->link);
+            free(node);
+        }
+        if (count == 0)
+        {
+            XF_LOGI(TAG, ">>end, count == 0"); 
+            return len_read;
+        }
+    }
+    // XF_LOGI(TAG, ">>end"); 
+#endif
+    return len_read;
 }
 
 static int port_uart_write(xf_hal_dev_t *dev, const void *buf, size_t count)
