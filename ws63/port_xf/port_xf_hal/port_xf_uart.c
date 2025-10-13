@@ -127,6 +127,8 @@ int port_xf_uart_register(void)
 
 XF_INIT_EXPORT_PREV(port_xf_uart_register);
 
+uint32_t g_recv_cnt = 0;
+
 /* ==================== [Static Functions] ================================== */
 
 #if defined(CONFIG_PORT_XF_UART_INT_TRANSFER_MODE)
@@ -140,7 +142,16 @@ static void _uartn_rx_int_cb(
         XF_LOGE(TAG, "uart%d int mode transfer illegal data!", bus);
         return;
     }
-    xf_ringbuf_write_force(&s_uart_obj_set[bus]->rx_ringbuf_info, buffer, length);
+
+    g_recv_cnt += length;
+    uint32_t irq_sts = uart_porting_lock(bus);
+    xf_rb_size_t free = xf_ringbuf_get_free(&s_uart_obj_set[bus]->rx_ringbuf_info);
+    if (free < length)
+    {
+        XF_LOGE(TAG, ">>>>>>:free:%d,len:%d,cnr:%d", free, length, g_recv_cnt);
+    }
+    xf_ringbuf_write(&s_uart_obj_set[bus]->rx_ringbuf_info, buffer, length);
+    uart_porting_unlock(bus, irq_sts);
 }
 
 static void _uart0_rx_int_cb(const void *buffer, uint16_t length, bool error)
@@ -407,8 +418,11 @@ static int port_uart_ioctl(xf_hal_dev_t *dev, uint32_t cmd, void *config)
 static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
 {
     port_uart_t *port_uart = (port_uart_t *)dev->platform_data;
+    uint8_t uart_num = dev->id;
     int32_t len = 0;
+    uint32_t irq_sts = uart_porting_lock(uart_num);
     len = xf_ringbuf_read(&port_uart->rx_ringbuf_info, buf, count);
+    uart_porting_unlock(uart_num, irq_sts);
     return len;
 }
 
