@@ -53,17 +53,6 @@
 
 /* ==================== [Static Prototypes] ================================= */
 
-/**
- * @brief 获取环形缓冲区状态。
- *
- * @param p_rb 环形缓冲区句柄。
- * @return xf_ringbuf_state_t 环形缓冲区状态
- *      - XF_RINGBUF_EMPTY          缓冲区空
- *      - XF_RINGBUF_FULL           缓冲区满
- *      - XF_RINGBUF_PARTIAL        缓冲区部分有数据
- *      - XF_RINGBUF_MAX            缓冲区句柄无效
- */
-static inline xf_ringbuf_state_t _xf_ringbuf_get_state(xf_ringbuf_t *p_rb);
 
 /**
  * @brief 内部直接获取有效元素个数。
@@ -124,7 +113,7 @@ bool xf_ringbuf_is_empty(xf_ringbuf_t *p_rb)
         return true;
     }
 #endif
-    return (_xf_ringbuf_get_state(p_rb) == XF_RINGBUF_EMPTY);
+    return p_rb->tail == p_rb->head;
 }
 
 bool xf_ringbuf_is_full(xf_ringbuf_t *p_rb)
@@ -134,17 +123,7 @@ bool xf_ringbuf_is_full(xf_ringbuf_t *p_rb)
         return true;
     }
 #endif
-    return (_xf_ringbuf_get_state(p_rb) == XF_RINGBUF_FULL);
-}
-
-xf_ringbuf_state_t xf_ringbuf_get_state(xf_ringbuf_t *p_rb)
-{
-#if _EN_CHECK_PARAMETER
-    if (NULL == p_rb) {
-        return XF_RINGBUF_MAX;
-    }
-#endif
-    return _xf_ringbuf_get_state(p_rb);
+    return p_rb->head == ((p_rb->tail + 1) % p_rb->buf_size);
 }
 
 xf_rb_size_t xf_ringbuf_get_count(xf_ringbuf_t *p_rb)
@@ -154,20 +133,7 @@ xf_rb_size_t xf_ringbuf_get_count(xf_ringbuf_t *p_rb)
         return 0;
     }
 #endif
-    xf_rb_size_t ret = 0;
-    switch (_xf_ringbuf_get_state(p_rb)) {
-    case XF_RINGBUF_EMPTY:
-        ret = 0;
-        break;
-    case XF_RINGBUF_FULL:
-        ret = p_rb->buf_size;
-        break;
-    case XF_RINGBUF_PARTIAL:
-    default:
-        ret = _xf_ringbuf_get_count(p_rb);
-        break;
-    }
-    return ret;
+    return _xf_ringbuf_get_count(p_rb);
 }
 
 xf_rb_size_t xf_ringbuf_get_free(xf_ringbuf_t *p_rb)
@@ -178,7 +144,7 @@ xf_rb_size_t xf_ringbuf_get_free(xf_ringbuf_t *p_rb)
     }
 #endif
     xf_rb_size_t count = xf_ringbuf_get_count(p_rb);
-    return p_rb->buf_size - count;
+    return p_rb->buf_size - count - 1;
 }
 
 xf_rb_size_t xf_ringbuf_get_size(xf_ringbuf_t *p_rb)
@@ -337,7 +303,7 @@ char xf_ringbuf_putchar(xf_ringbuf_t *p_rb, char ch)
         return 0;
     }
 #endif
-    if (_xf_ringbuf_get_state(p_rb) == XF_RINGBUF_FULL) {
+    if (xf_ringbuf_is_full(p_rb)) {
         return 0;
     }
     *((char *)p_rb->p_buf + p_rb->tail) = ch;
@@ -357,21 +323,11 @@ char xf_ringbuf_putchar_force(xf_ringbuf_t *p_rb, char ch)
         return 0;
     }
 #endif
-    xf_ringbuf_state_t old_state = _xf_ringbuf_get_state(p_rb);
+    if(xf_ringbuf_is_full(p_rb)) return 0;
+
     *((char *)p_rb->p_buf + p_rb->tail) = ch;
-    if (p_rb->buf_size - p_rb->tail > 1) {
-        p_rb->tail += 1;
-        if (old_state == XF_RINGBUF_FULL) {
-            p_rb->head = p_rb->tail;
-        }
-        return ch;
-    }
-    p_rb->tail_mirror = ~p_rb->tail_mirror;
-    p_rb->tail = 0;
-    if (old_state == XF_RINGBUF_FULL) {
-        p_rb->head_mirror = ~p_rb->head_mirror;
-        p_rb->head = p_rb->tail;
-    }
+    p_rb->tail += 1;
+    p_rb->tail %= p_rb->buf_size;
     return ch;
 }
 
@@ -382,7 +338,7 @@ char xf_ringbuf_getchar(xf_ringbuf_t *p_rb)
         return '\0';
     }
 #endif
-    if (_xf_ringbuf_get_state(p_rb) == XF_RINGBUF_EMPTY) {
+    if (xf_ringbuf_is_empty(p_rb)) {
         return '\0';
     }
     char ch = *((char *)p_rb->p_buf + p_rb->head);
@@ -400,23 +356,11 @@ char xf_ringbuf_getchar(xf_ringbuf_t *p_rb)
 
 /* ==================== [Static Functions] ================================== */
 
-static inline xf_ringbuf_state_t _xf_ringbuf_get_state(xf_ringbuf_t *p_rb)
-{
-    if (p_rb->head == p_rb->tail) {
-        if (p_rb->head_mirror == p_rb->tail_mirror) {
-            return XF_RINGBUF_EMPTY;
-        } else {
-            return XF_RINGBUF_FULL;
-        }
-    }
-    return XF_RINGBUF_PARTIAL;
-}
-
 static inline xf_rb_size_t _xf_ringbuf_get_count(xf_ringbuf_t *p_rb)
 {
     xf_rb_ofs_t head_idx_tmp = p_rb->head;
     xf_rb_ofs_t tail_idx_tmp = p_rb->tail;
-    if (tail_idx_tmp > head_idx_tmp) {
+    if (tail_idx_tmp >= head_idx_tmp) {
         return tail_idx_tmp - head_idx_tmp;
     }
     return p_rb->buf_size - (head_idx_tmp - tail_idx_tmp);
