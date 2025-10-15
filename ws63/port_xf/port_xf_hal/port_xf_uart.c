@@ -16,7 +16,7 @@
 #define RX_MODE_XT_RB   2
 #define RX_MODE_LIST    3
 
-#define RX_MODE     (RX_MODE_LIST)
+#define RX_MODE     (RX_MODE_XF_RB)
 
 #if (XF_HAL_UART_IS_ENABLE)
 
@@ -132,6 +132,16 @@ static xf_list_t s_recv_list = XF_LIST_HEAD_INIT(s_recv_list);
 
 /* ==================== [Global Functions] ================================== */
 
+static uint32_t checksum32(uint32_t prev_sum, const uint8_t *buf, size_t buf_size)
+{
+    uint32_t sum = prev_sum;
+    for (size_t i = 0; i < buf_size; i++) {
+        sum += buf[i];
+    }
+    return sum;
+}
+
+
 int port_xf_uart_register(void)
 {
     xf_driver_ops_t ops = {
@@ -146,8 +156,10 @@ int port_xf_uart_register(void)
 
 XF_INIT_EXPORT_PREV(port_xf_uart_register);
 
-uint32_t g_recv_cnt = 0;
-xf_rb_size_t g_w_rb_cnt = 0;
+volatile uint32_t g_test_urx_intr_cnt = 0;
+volatile int32_t g_test_urx_w_rb_cnt = 0;
+volatile uint32_t g_test_urx_intr_chksum;
+volatile uint32_t g_test_urx_r_rb_chksum;
 
 /* ==================== [Static Functions] ================================== */
 
@@ -162,22 +174,21 @@ static void _uartn_rx_int_cb(
         XF_LOGE(TAG, "uart%d int mode transfer illegal data!", bus);
         return;
     }
-
-    g_recv_cnt += length;
+    g_test_urx_intr_cnt += length;
+    g_test_urx_intr_chksum = checksum32(g_test_urx_intr_chksum, buffer, length);    
 
 #if (RX_MODE == RX_MODE_XF_RB)
     uint32_t irq_sts = uart_porting_lock(bus);
     xf_rb_size_t free = xf_ringbuf_get_free(&s_uart_obj_set[bus]->rx_ringbuf_info);
     if (free < length)
     {
-        XF_LOGE(TAG, ">>>>>>:free:%d,len:%d,cnr:%d", free, length, g_recv_cnt);
+        XF_LOGE(TAG, ">>>>>>:free:%d,len:%d,cnr:%d", free, length, g_test_urx_intr_cnt);
     }
-    g_w_rb_cnt += xf_ringbuf_write(&s_uart_obj_set[bus]->rx_ringbuf_info, buffer, length);
+    g_test_urx_w_rb_cnt += xf_ringbuf_write(&s_uart_obj_set[bus]->rx_ringbuf_info, buffer, length);
     uart_porting_unlock(bus, irq_sts);
 
 #elif (RX_MODE == RX_MODE_XT_RB)
-
-    g_w_rb_cnt += xtiny_rb_write(&s_uart_obj_set[bus]->rx_rb, buffer, length, XTINY_RB_NO_FORCE);
+    g_test_urx_w_rb_cnt += xtiny_rb_write(&s_uart_obj_set[bus]->rx_rb, buffer, length, XTINY_RB_NO_FORCE);
 
 #elif (RX_MODE == RX_MODE_LIST)
 
@@ -460,7 +471,7 @@ static int port_uart_ioctl(xf_hal_dev_t *dev, uint32_t cmd, void *config)
     return XF_OK;
 }
 
-uint32_t g_rb_cnt = 0;
+uint32_t g_test_urx_r_rb_cnt = 0;
 static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
 {
     port_uart_t *port_uart = (port_uart_t *)dev->platform_data;
@@ -471,23 +482,22 @@ static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
 
     uint32_t irq_sts = uart_porting_lock(uart_num);
     len_read = xf_ringbuf_read(&port_uart->rx_ringbuf_info, buf, count);
-    g_rb_cnt += len_read;
+    g_test_urx_r_rb_cnt += len_read;
     uart_porting_unlock(uart_num, irq_sts);
 
 #elif (RX_MODE == RX_MODE_XT_RB)
 
     len_read = xtiny_rb_read(&port_uart->rx_rb, buf, count);
-    g_rb_cnt += len_read;
+    g_test_urx_r_rb_cnt += len_read;
 
 #elif (RX_MODE == RX_MODE_LIST)
 
     port_uart_recv_node_t *node, *temp;
     xf_list_for_each_entry_safe(node, temp, &s_recv_list, port_uart_recv_node_t, link)
     {
-        uint16_t rest = node->len - node->offset;
         /* 预期剩余数量不超过节点剩余数 -> 本次拷贝数量等于 count */
         uint16_t len_copy = 0;
-        if (count <= rest)
+        if (count <= node->len)
         {
             len_copy = count;
             
@@ -495,14 +505,11 @@ static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
         /* 预期剩余数量超过节点剩余数 -> 本次拷贝数量等于 节点剩余数 */
         else
         {
-            len_copy = rest;
+            len_copy = node->len;
         }
 
         /* 拷贝数据，更新 预期剩余数 以及 节点信息 (offset， len) */
         memcpy(buf, &node->data[node->offset], len_copy);
-        ((uint8_t *)buf)[len_copy] = 0;
-        XF_LOGI(TAG, ">>node len:%d, off:%d, cp:%d, rest:%d,%.*s", 
-            node->len, node->offset, len_copy, count, len_copy, &node->data[node->offset]);
 
         count -= len_copy;
         node->offset += len_copy;
@@ -514,18 +521,17 @@ static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
         /* 节点有效数据量为 0 -> 移除并回收节点 */
         if (node->len == 0)
         {
-            XF_LOGI(TAG, ">> del node"); 
             xf_list_del(&node->link);
             free(node);
         }
         if (count == 0)
         {
-            XF_LOGI(TAG, ">>end, count == 0"); 
             return len_read;
         }
     }
     // XF_LOGI(TAG, ">>end"); 
 #endif
+    g_test_urx_r_rb_chksum = checksum32(g_test_urx_r_rb_chksum, buf, len_read);
     return len_read;
 }
 
