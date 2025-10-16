@@ -156,10 +156,11 @@ int port_xf_uart_register(void)
 
 XF_INIT_EXPORT_PREV(port_xf_uart_register);
 
-volatile uint32_t g_test_urx_intr_cnt = 0;
-volatile int32_t g_test_urx_w_rb_cnt = 0;
-volatile uint32_t g_test_urx_intr_chksum;
-volatile uint32_t g_test_urx_r_rb_chksum;
+volatile uint32_t g_dbg_urx_intr_cnt = 0;
+volatile uint32_t g_dbg_urx_r_cache_cnt = 0;
+volatile uint32_t g_dbg_urx_w_cache_cnt = 0;
+volatile uint32_t g_dbg_urx_intr_chksum = 0;
+volatile uint32_t g_dbg_urx_r_cache_chksum = 0;
 
 /* ==================== [Static Functions] ================================== */
 
@@ -174,21 +175,21 @@ static void _uartn_rx_int_cb(
         XF_LOGE(TAG, "uart%d int mode transfer illegal data!", bus);
         return;
     }
-    g_test_urx_intr_cnt += length;
-    g_test_urx_intr_chksum = checksum32(g_test_urx_intr_chksum, buffer, length);    
+    g_dbg_urx_intr_cnt += length;
+    g_dbg_urx_intr_chksum = checksum32(g_dbg_urx_intr_chksum, buffer, length);    
 
 #if (RX_MODE == RX_MODE_XF_RB)
     uint32_t irq_sts = uart_porting_lock(bus);
     xf_rb_size_t free = xf_ringbuf_get_free(&s_uart_obj_set[bus]->rx_ringbuf_info);
     if (free < length)
     {
-        XF_LOGE(TAG, ">>>>>>:free:%d,len:%d,cnr:%d", free, length, g_test_urx_intr_cnt);
+        XF_LOGE(TAG, ">>>>>>:free:%d,len:%d,cnr:%d", free, length, g_dbg_urx_intr_cnt);
     }
-    g_test_urx_w_rb_cnt += xf_ringbuf_write(&s_uart_obj_set[bus]->rx_ringbuf_info, buffer, length);
+    g_dbg_urx_w_cache_cnt += xf_ringbuf_write(&s_uart_obj_set[bus]->rx_ringbuf_info, buffer, length);
     uart_porting_unlock(bus, irq_sts);
 
 #elif (RX_MODE == RX_MODE_XT_RB)
-    g_test_urx_w_rb_cnt += xtiny_rb_write(&s_uart_obj_set[bus]->rx_rb, buffer, length, XTINY_RB_NO_FORCE);
+    g_dbg_urx_w_cache_cnt += xtiny_rb_write(&s_uart_obj_set[bus]->rx_rb, buffer, length, XTINY_RB_NO_FORCE);
 
 #elif (RX_MODE == RX_MODE_LIST)
 
@@ -471,7 +472,6 @@ static int port_uart_ioctl(xf_hal_dev_t *dev, uint32_t cmd, void *config)
     return XF_OK;
 }
 
-uint32_t g_test_urx_r_rb_cnt = 0;
 static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
 {
     port_uart_t *port_uart = (port_uart_t *)dev->platform_data;
@@ -482,13 +482,13 @@ static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
 
     uint32_t irq_sts = uart_porting_lock(uart_num);
     len_read = xf_ringbuf_read(&port_uart->rx_ringbuf_info, buf, count);
-    g_test_urx_r_rb_cnt += len_read;
+    g_dbg_urx_r_cache_cnt += len_read;
     uart_porting_unlock(uart_num, irq_sts);
 
 #elif (RX_MODE == RX_MODE_XT_RB)
 
     len_read = xtiny_rb_read(&port_uart->rx_rb, buf, count);
-    g_test_urx_r_rb_cnt += len_read;
+    g_dbg_urx_r_cache_cnt += len_read;
 
 #elif (RX_MODE == RX_MODE_LIST)
 
@@ -531,7 +531,7 @@ static int port_uart_read(xf_hal_dev_t *dev, void *buf, size_t count)
     }
     // XF_LOGI(TAG, ">>end"); 
 #endif
-    g_test_urx_r_rb_chksum = checksum32(g_test_urx_r_rb_chksum, buf, len_read);
+    g_dbg_urx_r_cache_chksum = checksum32(g_dbg_urx_r_cache_chksum, buf, len_read);
     return len_read;
 }
 
